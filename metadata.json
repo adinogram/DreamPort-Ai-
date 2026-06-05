@@ -1,0 +1,6 @@
+{
+  "name": "DreamPort AI",
+  "description": "An AI Founder Operating System that helps transform ideas into successful startups with AI agents, roadmaps, customer persona validators, marketing content planners, and integrated Web3 Celo payments.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
