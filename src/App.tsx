@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState, useEffect } from "react";
+import React, { useState, useEffect } from "react";
 import {
   Lightbulb,
   Coins,
@@ -32,8 +32,12 @@ import {
   FileText,
   X,
   UserCheck,
-  MessageSquare
+  MessageSquare,
+  Info,
+  AlertTriangle,
+  Menu
 } from "lucide-react";
+import { motion, AnimatePresence } from "motion/react";
 
 import {
   StartupIdea,
@@ -48,7 +52,9 @@ import {
   MVPBuilder,
   PitchDeck,
   MarketingPlan,
-  FundingReport
+  FundingReport,
+  Toast,
+  DEFAULT_BADGES
 } from "./types";
 
 export default function App() {
@@ -64,9 +70,32 @@ export default function App() {
     balanceCUSD: 10.0,
     balanceCELO: 5.0,
     completedCourseIds: [],
+    username: null,
+    role: null,
   });
   const [auditLogs, setAuditLogs] = useState<SystemAuditLogs[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Responsive sidebar toggler state
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+
+  // Onboarding Portal state
+  const [onboardUsername, setOnboardUsername] = useState("");
+  const [onboardRole, setOnboardRole] = useState("Chief Executive Officer");
+  const [onboardTargetIndustry, setOnboardTargetIndustry] = useState("AI/SaaS");
+  const [isOnboardingSigning, setIsOnboardingSigning] = useState(false);
+  const [onboardStep, setOnboardStep] = useState(1);
+
+  // Toast notifications state
+  const [toasts, setToasts] = useState<Toast[]>([]);
+
+  const showToast = (message: string, type: Toast["type"] = "info", duration = 4000) => {
+    const id = Math.random().toString(36).substring(2, 9);
+    setToasts((prev) => [...prev, { id, message, type, duration }]);
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    }, duration);
+  };
 
   // Selected state
   const [activeTab, setActiveTab] = useState<"dashboard" | "dream" | "agents" | "marketplace" | "academy" | "celo">("dashboard");
@@ -120,6 +149,8 @@ export default function App() {
         balanceCUSD: 10.0,
         balanceCELO: 5.0,
         completedCourseIds: [],
+        username: null,
+        role: null,
       });
       setAuditLogs(data.auditLogs || []);
       
@@ -132,6 +163,65 @@ export default function App() {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleCompleteOnboarding = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!onboardUsername.trim()) {
+      showToast("Please enter a professional Founder name or handle", "warning");
+      return;
+    }
+    setIsOnboardingSigning(true);
+    
+    // Simulate smart ledger deployment & onboarding verification
+    setTimeout(async () => {
+      try {
+        const generatedAddress = "0x" + Array.from({length: 40}, () => Math.floor(Math.random()*16).toString(16)).join("");
+        const updated = {
+          ...userState,
+          username: onboardUsername.trim(),
+          role: onboardRole,
+          walletConnected: true,
+          walletAddress: generatedAddress,
+          walletType: "minipay" as const,
+          balanceCUSD: 15.0,
+          balanceCELO: 8.0,
+          xp: userState.xp + 250, // Reward onboarding bonus!
+        };
+        setUserState(updated);
+        await fetch("/api/user-state", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(updated),
+        });
+        await fetchState();
+        showToast(`Founder identity verified: ${onboardUsername}! Welcome aboard.`, "success");
+      } catch (err) {
+        console.error("Onboarding error", err);
+        showToast("Error establishing ledger account.", "error");
+      } finally {
+        setIsOnboardingSigning(false);
+      }
+    }, 1500);
+  };
+
+  const handleResetProfile = async () => {
+    const updated = {
+      ...userState,
+      username: null,
+      role: null,
+      walletConnected: false,
+      walletAddress: null,
+      walletType: null,
+    };
+    setUserState(updated);
+    await fetch("/api/user-state", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(updated),
+    });
+    showToast("Profile reset. Please set up your founder credentials.", "info");
+    await fetchState();
   };
 
   useEffect(() => {
@@ -186,18 +276,21 @@ export default function App() {
   const handleGenerateReport = async (moduleKey: string) => {
     if (!selectedIdeaId) return;
     setIsGenerating(true);
+    const label = moduleKey === "dream" ? "Startup Concept" : (MODULE_METADATA[moduleKey]?.label || "Venture analysis");
     try {
       const res = await fetch(`/api/ideas/${selectedIdeaId}/generate/${moduleKey}`, {
         method: "POST",
       });
       if (res.ok) {
         await fetchState();
+        showToast(`Successfully generated ${label}!`, "success");
       } else {
         const errData = await res.json();
-        alert(errData.error || "Generation error");
+        showToast(`Failed to generate ${label}: ${errData.error || "Generation error"}`, "error");
       }
     } catch (e) {
       console.error(e);
+      showToast(`Network error occurred during ${label} generation.`, "error");
     } finally {
       setIsGenerating(false);
     }
@@ -206,7 +299,7 @@ export default function App() {
   // Simulate Celo Stablecoin Transaction signing
   const triggerUnlockRequest = (moduleKey: string, cost: number, currency: "cUSD" | "CELO", label: string) => {
     if (!userState.walletConnected) {
-      alert("Please connect your wallet first in the Account panel!");
+      showToast("Please connect your wallet first in the Account/Celo panel!", "warning");
       setActiveTab("celo");
       return;
     }
@@ -234,14 +327,16 @@ export default function App() {
 
       const data = await response.json();
       if (data.error) {
-        alert(data.error);
+        showToast(`Transaction error: ${data.error}`, "error");
       } else {
         await fetchState();
+        const labelText = pendingUnlock.label;
         setPendingUnlock(null);
+        showToast(`Successfully unlocked ${labelText}!`, "success");
       }
     } catch (e) {
       console.error(e);
-      alert("Web3 signing rejected or failed.");
+      showToast("Web3 block signing rejected or failed.", "error");
     } finally {
       setIsSigningTransaction(false);
     }
@@ -425,7 +520,7 @@ export default function App() {
         await fetchState();
       } else {
         const d = await res.json();
-        alert(d.error || "Consultation locked. Purchase in AI Workplace or Marketplace first.");
+        showToast(d.error || "Consultation locked. Purchase in AI Workplace or Marketplace first.", "error");
       }
     } catch (e) {
       console.error(e);
@@ -440,26 +535,239 @@ export default function App() {
     triggerUnlockRequest(agentName, cost, "cUSD", `${agentName} Consultation Agent`);
   };
 
+  if (isLoading) {
+    return (
+      <div className="flex h-screen w-full items-center justify-center bg-[#030712] text-white">
+        <div className="flex flex-col items-center gap-3">
+          <RefreshCw className="w-8 h-8 text-cyan-400 animate-spin" />
+          <p className="text-xs text-slate-400 font-mono">Syncing system state container...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!userState.username) {
+    return (
+      <div className="flex h-screen min-h-screen w-full bg-[#030712] text-white relative overflow-hidden font-sans items-center justify-center p-4">
+        {/* Sleek Mesh Gradient Blurs */}
+        <div className="absolute top-[-100px] left-[-150px] w-[500px] h-[500px] bg-cyan-600/10 rounded-full blur-[140px] pointer-events-none"></div>
+        <div className="absolute bottom-[-100px] right-[-100px] w-[550px] h-[550px] bg-violet-600/10 rounded-full blur-[150px] pointer-events-none"></div>
+
+        <motion.div 
+          initial={{ opacity: 0, y: 30 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="w-full max-w-lg bg-slate-900/40 border border-white/10 rounded-[32px] p-6 md:p-8 backdrop-blur-xl relative overflow-hidden shadow-2xl shadow-cyan-500/5 text-left"
+        >
+          <div className="absolute top-0 right-0 w-32 h-32 bg-cyan-500/5 rounded-full blur-3xl pointer-events-none"></div>
+
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-10 h-10 bg-gradient-to-br from-cyan-400 to-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-cyan-500/25">
+              <Sparkles className="w-5 h-5 text-white" />
+            </div>
+            <div>
+              <h2 className="text-lg font-black tracking-tight" id="onboarding-brand-title">DreamPort <span className="text-cyan-400">AI</span></h2>
+              <p className="text-[10px] text-slate-400 font-mono uppercase tracking-wider">Entrepreneurial Matrix & Ledger</p>
+            </div>
+          </div>
+
+          <form onSubmit={handleCompleteOnboarding} className="space-y-6" id="onboarding-founder-form">
+            <div>
+              <h3 className="text-xl font-bold tracking-tight text-white">Open Your Founder Account</h3>
+              <p className="text-slate-400 text-xs mt-1">Deploy an on-chain cryptographic workspace to incubate, refine and settle ventures stably with Celo.</p>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1.5 pl-1">Founder Identity Handle</label>
+                <div className="relative">
+                  <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-600 font-mono text-xs">@</span>
+                  <input
+                    type="text"
+                    value={onboardUsername}
+                    onChange={(e) => setOnboardUsername(e.target.value)}
+                    placeholder="satoshi_founder"
+                    required
+                    className="w-full bg-slate-950/40 border border-white/10 hover:border-white/20 focus:border-cyan-500/60 rounded-xl pl-8 pr-4 py-3 text-xs text-white focus:outline-none placeholder:text-slate-600 font-mono transition-colors"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1.5 pl-1">Startup Ecosystem Role</label>
+                <select
+                  value={onboardRole}
+                  onChange={(e) => setOnboardRole(e.target.value)}
+                  className="w-full bg-[#0d1124] border border-white/10 focus:border-cyan-500/60 rounded-xl px-4 py-3 text-xs text-white focus:outline-none cursor-pointer font-semibold transition-colors"
+                >
+                  <option value="Chief Executive Officer" className="text-white bg-slate-900">Chief Executive Officer (Strategy/Growth)</option>
+                  <option value="Chief Technology Officer" className="text-white bg-slate-900">Chief Technology Officer (Product/Stack)</option>
+                  <option value="Sole Founder" className="text-white bg-slate-900">Sole Generalist Founder (All-rounder)</option>
+                  <option value="Lead Blockchain Architect" className="text-white bg-slate-900">Lead Blockchain Architect (Celo/Smart Contracts)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-[10px] text-slate-500 font-bold uppercase tracking-wider mb-1.5 pl-1">Primary Venture Focus</label>
+                <select
+                  value={onboardTargetIndustry}
+                  onChange={(e) => setOnboardTargetIndustry(e.target.value)}
+                  className="w-full bg-[#0d1124] border border-white/10 focus:border-cyan-500/60 rounded-xl px-4 py-3 text-xs text-white focus:outline-none cursor-pointer font-semibold transition-colors"
+                >
+                  <option value="AI/SaaS" className="text-white bg-slate-900">🤖 AI Intelligent Services (SaaS)</option>
+                  <option value="Web3 Payments" className="text-white bg-slate-900">🪙 Web3 & Stablecoin Utility Payments</option>
+                  <option value="Greentech" className="text-white bg-slate-900">🌱 Clean Energy & Greentech Networks</option>
+                  <option value="Edtech" className="text-white bg-slate-900">🎓 Interactive Education & Onboarding</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Micro simulation text */}
+            <div className="bg-slate-950/60 rounded-2xl border border-white/5 p-4 space-y-2 text-[10px] font-mono text-slate-400">
+              <div className="flex justify-between items-center text-cyan-400 font-bold">
+                <span>⚡ DEPLOYMENT SPECIFICATIONS:</span>
+                <span className="text-[9px] bg-cyan-500/10 px-1.5 py-0.5 rounded uppercase font-sans">Simulated Celo Gas</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Account Balance Reward:</span>
+                <span className="text-emerald-400 font-bold">+15.00 cUSD</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Registration Reward:</span>
+                <span className="text-yellow-500 font-bold">+250 XP (LVL Onboard)</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Ledger Core:</span>
+                <span>MiniPay Micro-settlement protocol</span>
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={isOnboardingSigning}
+              className="w-full py-3.5 bg-gradient-to-r from-cyan-400 via-sky-500 to-indigo-600 hover:from-cyan-300 hover:to-indigo-500 text-white font-bold text-xs uppercase tracking-widest rounded-xl transition-all scale-100 hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50 flex items-center justify-center gap-2 shadow-lg shadow-cyan-500/20 cursor-pointer"
+            >
+              {isOnboardingSigning ? (
+                <>
+                  <RefreshCw className="w-4 h-4 animate-spin" /> Establish Celo Ledger Anchor...
+                </>
+              ) : (
+                <>
+                  <UserCheck className="w-4 h-4" /> Deploy Founder Identity & Enter
+                </>
+              )}
+            </button>
+          </form>
+        </motion.div>
+      </div>
+    );
+  }
+
   return (
     <div id="dreamport-app-root" className="flex h-screen w-full bg-[#030712] text-white font-sans overflow-hidden relative">
       
+      {/* Toast Notifications Container */}
+      <div className="fixed top-6 right-6 z-50 flex flex-col gap-3 max-w-sm w-full pointer-events-none">
+        <AnimatePresence>
+          {toasts.map((toast) => {
+            let IconComponent = Info;
+            let bgColor = "bg-slate-900/90 border-slate-700 text-slate-100 shadow-slate-900/50";
+            let accentColor = "text-sky-400";
+            let barColor = "bg-sky-500";
+            
+            if (toast.type === "success") {
+              IconComponent = CheckCircle2;
+              bgColor = "bg-emerald-950/90 border-emerald-500/30 text-emerald-50 shadow-emerald-500/10";
+              accentColor = "text-emerald-400";
+              barColor = "bg-emerald-500";
+            } else if (toast.type === "error") {
+              IconComponent = AlertCircle;
+              bgColor = "bg-rose-950/90 border-rose-500/30 text-rose-50 shadow-rose-500/10";
+              accentColor = "text-rose-400";
+              barColor = "bg-rose-500";
+            } else if (toast.type === "warning") {
+              IconComponent = AlertTriangle;
+              bgColor = "bg-amber-950/90 border-amber-500/30 text-amber-50 shadow-amber-500/10";
+              accentColor = "text-amber-400";
+              barColor = "bg-amber-500";
+            } else {
+              IconComponent = Sparkles;
+              bgColor = "bg-cyan-950/90 border-cyan-500/30 text-cyan-50 shadow-cyan-500/10";
+              accentColor = "text-cyan-400";
+              barColor = "bg-cyan-500";
+            }
+
+            return (
+              <motion.div
+                key={toast.id}
+                layout
+                initial={{ opacity: 0, y: -20, scale: 0.95, x: 20 }}
+                animate={{ opacity: 1, y: 0, scale: 1, x: 0 }}
+                exit={{ opacity: 0, scale: 0.9, x: 30, transition: { duration: 0.2 } }}
+                className={`p-4 rounded-xl border backdrop-blur-md flex items-start gap-3 shadow-xl pointer-events-auto relative overflow-hidden group ${bgColor}`}
+              >
+                <div className="mt-0.5 pointer-events-none">
+                  <IconComponent className={`w-5 h-5 ${accentColor}`} />
+                </div>
+                <div className="flex-1 pointer-events-none">
+                  <p className="text-xs font-semibold leading-relaxed font-sans">{toast.message}</p>
+                </div>
+                <button
+                  onClick={() => setToasts((prev) => prev.filter((t) => t.id !== toast.id))}
+                  className="text-white/40 hover:text-white/80 p-0.5 rounded-lg transition-colors cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+                
+                {/* Progress bar timer indicator */}
+                <motion.div
+                  initial={{ width: "100%" }}
+                  animate={{ width: "0%" }}
+                  transition={{ duration: toast.duration / 1000, ease: "linear" }}
+                  className={`absolute bottom-0 left-0 h-1 ${barColor}`}
+                />
+              </motion.div>
+            );
+          })}
+        </AnimatePresence>
+      </div>
+
       {/* Sleek Mesh Gradient Blurs */}
       <div className="absolute top-[-100px] left-[-150px] w-[500px] h-[500px] bg-sky-600/10 rounded-full blur-[140px] pointer-events-none"></div>
       <div className="absolute bottom-[-100px] right-[-100px] w-[550px] h-[550px] bg-violet-600/10 rounded-full blur-[150px] pointer-events-none"></div>
 
+      {/* Sidebar Navigation Drawer Backdrops (Mobile only) */}
+      {isSidebarOpen && (
+        <div 
+          onClick={() => setIsSidebarOpen(false)}
+          className="fixed inset-0 bg-black/70 backdrop-blur-xs z-40 md:hidden transition-opacity"
+        />
+      )}
+
       {/* Sidebar Navigation */}
-      <aside className="w-64 border-r border-white/5 bg-white/5 backdrop-blur-2xl flex flex-col z-20 shrink-0">
-        <div className="p-6 flex items-center gap-3 border-b border-white/5">
-          <div className="w-8 h-8 bg-gradient-to-br from-cyan-400 to-indigo-600 rounded-lg flex items-center justify-center shadow-lg shadow-cyan-500/10">
-            <Sparkles className="w-5 h-5 text-white" />
+      <aside className={`fixed inset-y-0 left-0 w-64 border-r border-white/5 bg-[#090d1f] md:bg-white/5 backdrop-blur-3xl md:backdrop-blur-2xl flex flex-col z-50 shrink-0 transform transition-transform duration-300 ease-in-out md:relative md:translate-x-0 ${isSidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}`}>
+        <div className="p-6 flex items-center justify-between border-b border-white/5">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 bg-gradient-to-br from-cyan-400 to-indigo-600 rounded-lg flex items-center justify-center shadow-lg shadow-cyan-500/10">
+              <Sparkles className="w-5 h-5 text-white" />
+            </div>
+            <span className="text-lg font-bold tracking-tight">DreamPort <span className="text-cyan-400">AI</span></span>
           </div>
-          <span className="text-lg font-bold tracking-tight">DreamPort <span className="text-cyan-400">AI</span></span>
+          {/* Mobile close button */}
+          <button 
+            onClick={() => setIsSidebarOpen(false)}
+            className="md:hidden p-1 text-slate-400 hover:text-white rounded-lg hover:bg-white/5 cursor-pointer"
+          >
+            <X className="w-5 h-5" />
+          </button>
         </div>
 
         <div className="p-4">
           <button
-            onClick={() => setIsCreatingIdea(true)}
-            className="w-full flex items-center justify-center gap-2 py-2 px-4 bg-gradient-to-r from-cyan-500 to-indigo-500 hover:from-cyan-400 hover:to-indigo-400 active:scale-[0.98] rounded-xl text-xs font-bold transition-all shadow-lg shadow-cyan-500/15"
+            onClick={() => {
+              setIsCreatingIdea(true);
+              setIsSidebarOpen(false); // Close mobile drawer
+            }}
+            className="w-full flex items-center justify-center gap-2 py-2 px-4 bg-gradient-to-r from-cyan-500 to-indigo-500 hover:from-cyan-400 hover:to-indigo-400 active:scale-[0.98] rounded-xl text-xs font-bold transition-all shadow-lg shadow-cyan-500/15 cursor-pointer"
           >
             <Plus className="w-4 h-4" /> Incubate New Idea
           </button>
@@ -471,7 +779,10 @@ export default function App() {
           <div className="relative mt-1">
             <select
               value={selectedIdeaId}
-              onChange={(e) => setSelectedIdeaId(e.target.value)}
+              onChange={(e) => {
+                setSelectedIdeaId(e.target.value);
+                setIsSidebarOpen(false); // Close mobile drawer
+              }}
               className="w-full bg-white/5 border border-white/10 rounded-xl px-3 py-2 text-xs font-medium text-slate-200 focus:outline-none focus:border-cyan-500 cursor-pointer"
             >
               <option value="" disabled className="bg-slate-900">Select active startup...</option>
@@ -487,8 +798,11 @@ export default function App() {
         <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
           <div className="text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-2 mb-2">Workspace Hub</div>
           <button
-            onClick={() => setActiveTab("dashboard")}
-            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-medium transition-all ${
+            onClick={() => {
+              setActiveTab("dashboard");
+              setIsSidebarOpen(false);
+            }}
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-medium transition-all cursor-pointer ${
               activeTab === "dashboard" ? "bg-white/10 text-white border-l-2 border-cyan-400 font-bold" : "text-slate-400 hover:text-white hover:bg-white/5"
             }`}
           >
@@ -499,58 +813,85 @@ export default function App() {
           <button
             onClick={() => {
               if (!activeIdea) {
-                alert("Please incubate or select a startup idea context first!");
+                showToast("Please incubate or select a startup idea context first!", "warning");
                 setIsCreatingIdea(true);
+                setIsSidebarOpen(false);
                 return;
               }
               setActiveTab("dream");
+              setIsSidebarOpen(false);
             }}
-            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-medium transition-all ${
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-medium transition-all cursor-pointer ${
               activeTab === "dream" ? "bg-white/10 text-white border-l-2 border-cyan-400 font-bold" : "text-slate-400 hover:text-white hover:bg-white/5"
             }`}
           >
-            <Lightbulb className="w-4 h-4 text-yellow-400" />
+            <motion.div
+              animate={isGenerating && activeTab === "dream" ? { scale: [1, 1.25, 1], opacity: [0.65, 1, 0.65] } : {}}
+              transition={{ repeat: Infinity, duration: 1.5, ease: "easeInOut" }}
+              className="flex items-center justify-center shrink-0"
+            >
+              <Lightbulb className="w-4 h-4 text-yellow-400" />
+            </motion.div>
             <span>Dream Agent (Free)</span>
           </button>
 
           <button
             onClick={() => {
               if (!activeIdea) {
-                alert("Please incubate or select a startup idea context first!");
+                showToast("Please incubate or select a startup idea context first!", "warning");
                 setIsCreatingIdea(true);
+                setIsSidebarOpen(false);
                 return;
               }
               setActiveTab("agents");
+              setIsSidebarOpen(false);
             }}
-            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-medium transition-all ${
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-medium transition-all cursor-pointer ${
               activeTab === "agents" ? "bg-white/10 text-white border-l-2 border-cyan-400 font-bold" : "text-slate-400 hover:text-white hover:bg-white/5"
             }`}
           >
-            <Layers className="w-4 h-4 text-emerald-400" />
+            <motion.div
+              animate={isGenerating && activeTab === "agents" ? { scale: [1, 1.25, 1], opacity: [0.65, 1, 0.65] } : {}}
+              transition={{ repeat: Infinity, duration: 1.5, ease: "easeInOut" }}
+              className="flex items-center justify-center shrink-0"
+            >
+              <Layers className="w-4 h-4 text-emerald-400" />
+            </motion.div>
             <span>AI Workplace (Premium)</span>
           </button>
 
           <button
             onClick={() => {
               if (!activeIdea) {
-                alert("Please incubate or select a startup idea context first!");
+                showToast("Please incubate or select a startup idea context first!", "warning");
                 setIsCreatingIdea(true);
+                setIsSidebarOpen(false);
                 return;
               }
               setActiveTab("marketplace");
+              setIsSidebarOpen(false);
             }}
-            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-medium transition-all ${
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-medium transition-all cursor-pointer ${
               activeTab === "marketplace" ? "bg-white/10 text-white border-l-2 border-cyan-400 font-bold" : "text-slate-400 hover:text-white hover:bg-white/5"
             }`}
           >
-            <MessageSquare className="w-4 h-4 text-purple-400" />
+            <motion.div
+              animate={isConsulting ? { scale: [1, 1.25, 1], opacity: [0.65, 1, 0.65] } : {}}
+              transition={{ repeat: Infinity, duration: 1.5, ease: "easeInOut" }}
+              className="flex items-center justify-center shrink-0"
+            >
+              <MessageSquare className="w-4 h-4 text-purple-400" />
+            </motion.div>
             <span>Consulting Agents</span>
           </button>
 
           <div className="pt-4 text-[10px] font-bold text-slate-500 uppercase tracking-widest pl-2 mb-2">Education & Ledger</div>
           <button
-            onClick={() => setActiveTab("academy")}
-            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-medium transition-all ${
+            onClick={() => {
+              setActiveTab("academy");
+              setIsSidebarOpen(false);
+            }}
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-medium transition-all cursor-pointer ${
               activeTab === "academy" ? "bg-white/10 text-white border-l-2 border-cyan-400 font-bold" : "text-slate-400 hover:text-white hover:bg-white/5"
             }`}
           >
@@ -559,8 +900,11 @@ export default function App() {
           </button>
 
           <button
-            onClick={() => setActiveTab("celo")}
-            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-medium transition-all ${
+            onClick={() => {
+              setActiveTab("celo");
+              setIsSidebarOpen(false);
+            }}
+            className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-xs font-medium transition-all cursor-pointer ${
               activeTab === "celo" ? "bg-white/10 text-white border-l-2 border-cyan-400 font-bold" : "text-slate-400 hover:text-white hover:bg-white/5"
             }`}
           >
@@ -568,6 +912,30 @@ export default function App() {
             <span>Celo Wallet Sandbox</span>
           </button>
         </nav>
+
+        {/* Founder Account Profile Card */}
+        <div className="px-4 pb-1">
+          <div className="bg-cyan-500/5 rounded-2xl border border-cyan-500/10 p-3 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 overflow-hidden">
+              <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-cyan-400 to-indigo-500 flex items-center justify-center shrink-0 shadow">
+                <span className="text-[10px] uppercase font-bold text-white">
+                  {userState.username?.substring(0, 2)}
+                </span>
+              </div>
+              <div className="overflow-hidden text-left">
+                <h4 className="text-[11px] font-bold text-white truncate">@{userState.username}</h4>
+                <p className="text-[9px] text-slate-400 truncate leading-tight">{userState.role}</p>
+              </div>
+            </div>
+            <button 
+              onClick={handleResetProfile}
+              title="Reset profile (Log Out)"
+              className="p-1 hover:text-rose-400 text-slate-500 transition-colors uppercase text-[9px] font-bold hover:bg-rose-500/10 rounded cursor-pointer"
+            >
+              Reset
+            </button>
+          </div>
+        </div>
 
         {/* Founder XP Badge Panel */}
         <div className="p-4 border-t border-white/5">
@@ -594,10 +962,19 @@ export default function App() {
       <main className="flex-1 flex flex-col overflow-hidden relative z-10 bg-white/[0.01]">
         
         {/* Header Ribbon */}
-        <header className="h-16 border-b border-white/5 bg-white/5 backdrop-blur-md flex items-center justify-between px-8 z-10 shrink-0">
-          <div className="flex items-center gap-4">
-            <div className="bg-slate-900/60 rounded-full px-4 py-1 flex items-center gap-2 border border-white/10 text-xs">
-              <div className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></div>
+        <header className="h-16 border-b border-white/5 bg-white/5 backdrop-blur-md flex items-center justify-between px-4 md:px-8 z-10 shrink-0">
+          <div className="flex items-center gap-2 md:gap-4">
+            {/* Mobile Sidebar Hamburger Toggle */}
+            <button
+              onClick={() => setIsSidebarOpen(true)}
+              className="md:hidden p-2 -ml-2 text-slate-400 hover:text-white rounded-lg hover:bg-white/5 cursor-pointer"
+              title="Open Navigation Menu"
+            >
+              <Menu className="w-5 h-5 text-cyan-400" />
+            </button>
+
+            <div className="bg-slate-900/60 rounded-full px-3 md:px-4 py-1 flex items-center gap-1.5 md:gap-2 border border-white/10 text-[10px] md:text-xs">
+              <div className="w-1.5 md:w-2 h-1.5 md:h-2 rounded-full bg-cyan-400 animate-pulse"></div>
               <span className="text-slate-300">
                 Active: <span className="font-semibold text-white">{activeIdea ? activeIdea.title : "None Selected"}</span>
               </span>
@@ -636,26 +1013,26 @@ export default function App() {
         </header>
 
         {/* Content Box */}
-        <div className="flex-1 overflow-y-auto p-8 relative">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-8 relative">
 
           {/* 1. FOUNDER DASHBOARD */}
-          {activeTab === "dashboard" && (
+           {activeTab === "dashboard" && (
             <div className="space-y-8 animate-fade-in">
-              <div className="flex justify-between items-start">
+              <div className="flex flex-col sm:flex-row justify-between items-start gap-4">
                 <div>
-                  <h1 className="text-3xl font-extrabold tracking-tight mb-1 text-white">Hello, Entrepreneur.</h1>
+                  <h1 className="text-3xl font-extrabold tracking-tight mb-1 text-white">Hello, {userState.username || "Entrepreneur"}.</h1>
                   <p className="text-slate-400 text-sm">Empower your venture using on-demand intelligence agents, local storage states, and MiniPay-ready assets.</p>
                 </div>
                 <button
                   onClick={handleResetDB}
-                  className="px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 hover:border-red-500/40 rounded-xl text-[10px] font-mono tracking-wider uppercase transition-all"
+                  className="px-3 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 hover:border-red-500/40 rounded-xl text-[10px] font-mono tracking-wider uppercase transition-all cursor-pointer"
                 >
                   Reset Framework Data
                 </button>
               </div>
 
               {/* Dynamic Stats Grid */}
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
                 <div className="bg-white/[0.04] border border-white/5 rounded-2xl p-5 backdrop-blur-sm shadow-md">
                   <div className="text-slate-500 text-[10px] font-bold uppercase tracking-wider mb-1">Ideas Registered</div>
                   <div className="text-3xl font-extrabold text-white">{ideas.length}</div>
@@ -960,7 +1337,13 @@ export default function App() {
                         activeAgentModule === key ? "bg-white/10 text-white font-bold" : "text-slate-400 hover:text-stone-200"
                       }`}
                     >
-                      <Icon className="w-4 h-4" />
+                      <motion.div
+                        animate={isGenerating && activeAgentModule === key ? { scale: [1, 1.25, 1], opacity: [0.65, 1, 0.65] } : {}}
+                        transition={{ repeat: Infinity, duration: 1.5, ease: "easeInOut" }}
+                        className="flex items-center justify-center shrink-0"
+                      >
+                        <Icon className="w-4 h-4" />
+                      </motion.div>
                       <span>{meta.label}</span>
                       {unlocked ? (
                         <span className="text-[8px] bg-green-500/10 text-green-400 px-1.5 py-0.5 rounded uppercase font-bold border border-green-500/20">Unlocked</span>
@@ -1282,7 +1665,7 @@ export default function App() {
                                   <button
                                     onClick={() => {
                                       navigator.clipboard.writeText(mvp.databaseSchema);
-                                      alert("Copied database schema script to clipboard!");
+                                      showToast("Copied database schema script to clipboard!", "success");
                                     }}
                                     className="mt-3 px-3 py-1.5 bg-indigo-500/10 hover:bg-indigo-500/20 rounded-xl text-[10px] font-bold text-indigo-400 border border-indigo-500/20 transition-colors"
                                   >
@@ -1394,7 +1777,7 @@ export default function App() {
                                             key={k}
                                             onClick={() => {
                                               navigator.clipboard.writeText(col);
-                                              alert(`Copied hex value: "${col}"`);
+                                              showToast(`Copied hex value: "${col}"`, "success");
                                             }}
                                             className="px-2 py-1 bg-slate-800 border border-white/10 rounded text-[9px] font-mono text-slate-300 hover:border-cyan-500/40 cursor-pointer"
                                           >

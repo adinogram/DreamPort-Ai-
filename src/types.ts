@@ -190,8 +190,17 @@ export interface Badge {
   description: string;
   iconName: string;
   unlockedAt?: string;
-  category: "creation" | "validation" | "finance" | "tech" | "marketing" | "blockchain";
+  category: string;
 }
+
+export const DEFAULT_BADGES: Badge[] = [
+  { id: "first-idea", name: "Spark of Genius", description: "Created your first startup concept on DreamPort AI", iconName: "lightbulb", category: "creation" },
+  { id: "validated", name: "Certified Truth", description: "Validated your startup concept using the Startup Validator Agent", iconName: "shield-check", category: "validation" },
+  { id: "finance-whiz", name: "Capital Strategist", description: "Formulated your business plan & initial financial forecast", iconName: "wallet", category: "finance" },
+  { id: "mvp-builder", name: "Launch Engineer", description: "Created developer specification, user flows and DB schemas", iconName: "cpu", category: "tech" },
+  { id: "pitch-perfect", name: "Storyteller", description: "Generated an investor pitch deck slide structure", iconName: "presentation", category: "growth" },
+  { id: "blockchain-pioneer", name: "Celo Pioneer", description: "Connected your Celo wallet & signed first agent micropayment", iconName: "coins", category: "blockchain" },
+];
 
 export interface QuizQuestion {
   id: string;
@@ -228,6 +237,8 @@ export interface UserState {
   balanceCUSD: number;
   balanceCELO: number;
   completedCourseIds: string[];
+  username?: string | null;
+  role?: string | null;
 }
 
 export interface SystemAuditLogs {
@@ -245,3 +256,11 @@ export interface DBState {
   userState: UserState;
   auditLogs: SystemAuditLogs[];
 }
+
+export interface Toast {
+  id: string;
+  message: string;
+  type: "success" | "error" | "info" | "warning";
+  duration: number;
+}
+
